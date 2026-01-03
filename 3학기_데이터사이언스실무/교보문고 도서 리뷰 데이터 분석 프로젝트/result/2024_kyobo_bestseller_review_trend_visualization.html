@@ -1,0 +1,414 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>2024년 교보문고 베스트셀러 리뷰 트랜드</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.0.0"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Nanum+Gothic:wght@400;700;800&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Nanum Gothic', sans-serif;
+            margin: 20px;
+            background-color: #f5f5f5;
+            color: #333;
+            font-size: 20px;
+            font-weight: bold;
+        }
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: white;
+            border-radius: 10px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+        }
+        .chart-container {
+            margin: 40px 0;
+            padding: 30px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            background-color: white;
+        }
+        .insight-box {
+            margin: 20px 0;
+            padding: 20px;
+            background-color: #f8f9fa;
+            border-left: 4px solid #007bff;
+            font-size: 20px;
+            line-height: 1.6;
+            font-weight: bold;
+        }
+        h1 {
+            text-align: center;
+            color: #2c3e50;
+            margin-bottom: 40px;
+            font-size: 2.8em;
+            font-weight: bold;
+        }
+        h2 {
+            color: #34495e;
+            margin: 30px 0;
+            padding-bottom: 15px;
+            border-bottom: 2px solid #eee;
+            font-size: 2em;
+            font-weight: bold;
+        }
+        canvas {
+            max-width: 100%;
+            height: 500px !important;
+            margin: 20px 0;
+        }
+        .tab-container {
+            display: flex;
+            justify-content: center;
+            gap: 20px;
+            margin-bottom: 40px;
+            position: sticky;
+            top: 0;
+            background-color: white;
+            padding: 20px 0;
+            z-index: 1000;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        .tab-button {
+            padding: 15px 30px;
+            font-size: 20px;
+            font-weight: bold;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            background-color: #e9ecef;
+            color: #495057;
+            transition: all 0.3s ease;
+        }
+        .tab-button:hover {
+            background-color: #007bff;
+            color: white;
+        }
+        .tab-button.active {
+            background-color: #007bff;
+            color: white;
+        }
+        #loading {
+            text-align: center;
+            font-size: 24px;
+            margin: 40px;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>2024년 교보문고 베스트셀러 리뷰 트랜드</h1>
+
+        <div class="tab-container">
+            <button class="tab-button active">도서별 트랜드</button>
+            <button class="tab-button" onclick="location.href='2024_kyobo_bestseller_review_trend_visualization_sentiment.html'">감성 트랜드</button>
+            <button class="tab-button" onclick="location.href='2024_kyobo_bestseller_review_trend_visualization_keyword.html'">키워드 트랜드</button>
+        </div>
+
+        <div id="loading">데이터를 불러오는 중...</div>
+
+        <!-- 도서별 리뷰수 분포 -->
+        <div class="chart-container">
+            <h2>도서별 리뷰수 분포</h2>
+            <canvas id="reviewCountChart"></canvas>
+            <div class="insight-box">
+                <p id="reviewCountInsight"></p>
+            </div>
+        </div>
+
+        <!-- 도서별 감성 분석 결과 분포 -->
+        <div class="chart-container">
+            <h2>도서별 감성 분석 결과 분포</h2>
+            <canvas id="sentimentDistributionChart"></canvas>
+            <div class="insight-box">
+                <p id="sentimentDistributionInsight"></p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Chart.js 플러그인 등록
+        const ChartDataLabels = window.ChartDataLabels;
+        Chart.register(ChartDataLabels);
+
+        async function loadData() {
+            try {
+                document.getElementById('loading').style.display = 'block';
+                
+                // 도서 리스트 데이터 로드 (리뷰 수 정보)
+                const bookListResponse = await fetch('../data/kyobo_book_list.csv');
+                if (!bookListResponse.ok) {
+                    throw new Error(`도서 리스트 로드 실패: ${bookListResponse.status}`);
+                }
+                const bookListText = await bookListResponse.text();
+                const bookListRows = bookListText.split('\n')
+                    .filter(row => row.trim()) // 빈 줄 제거
+                    .map(row => row.split(','));
+                
+                // 헤더 행이 존재하는지 확인
+                if (bookListRows.length === 0) {
+                    throw new Error('도서 리스트 파일이 비어있습니다.');
+                }
+                
+                const bookListHeaders = bookListRows[0].map(header => (header || '').trim());
+                const titleIndex = bookListHeaders.indexOf('도서 제목');
+                const reviewCountIndex = bookListHeaders.indexOf('리뷰 수');
+                
+                if (titleIndex === -1 || reviewCountIndex === -1) {
+                    throw new Error('필요한 컬럼(도서제목 또는 리뷰수)을 찾을 수 없습니다.');
+                }
+
+                // 도서별 리뷰 수 정보 추출
+                const bookReviews = {};
+                bookListRows.slice(1)
+                    .filter(row => row.length >= Math.max(titleIndex, reviewCountIndex) + 1)
+                    .forEach(row => {
+                        const title = (row[titleIndex] || '').trim();
+                        const reviewCount = parseInt(row[reviewCountIndex]) || 0;
+                        
+                        if (title && title !== 'undefined' && title !== '0.8') {
+                            bookReviews[title] = reviewCount;
+                        }
+                    });
+
+                // 데이터가 비어있는지 확인
+                if (Object.keys(bookReviews).length === 0) {
+                    throw new Error('유효한 도서 리뷰 데이터가 없습니다.');
+                }
+
+                // 리뷰 수로 정렬하여 상위 20개 추출
+                const top20Books = Object.entries(bookReviews)
+                    .sort((a, b) => b[1] - a[1])
+                    .slice(0, 20);
+
+                const ctx = document.getElementById('reviewCountChart').getContext('2d');
+                new Chart(ctx, {
+                    type: 'bar',
+                    data: {
+                        labels: top20Books.map(book => book[0]),
+                        datasets: [{
+                            label: '리뷰 수',
+                            data: top20Books.map(book => book[1]),
+                            backgroundColor: 'rgba(54, 162, 235, 0.8)',
+                            borderColor: 'rgba(54, 162, 235, 1)',
+                            borderWidth: 1
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            datalabels: {
+                                color: '#000',
+                                font: {
+                                    size: 20,
+                                    weight: 'bold'
+                                },
+                                formatter: value => value.toLocaleString()
+                            },
+                            legend: {
+                                display: true,
+                                labels: {
+                                    font: {
+                                        size: 20,
+                                        weight: 'bold'
+                                    }
+                                }
+                            }
+                        },
+                        scales: {
+                            x: {
+                                ticks: {
+                                    font: {
+                                        size: 20,
+                                        weight: 'bold'
+                                    },
+                                    maxRotation: 45,
+                                    minRotation: 45
+                                }
+                            },
+                            y: {
+                                beginAtZero: true,
+                                ticks: {
+                                    font: {
+                                        size: 20,
+                                        weight: 'bold'
+                                    }
+                                }
+                            }
+                        }
+                    }
+                });
+
+                // 인사이트 업데이트
+                const totalReviews = Object.values(bookReviews).reduce((a, b) => a + b, 0);
+                const avgReviews = totalReviews / Object.keys(bookReviews).length;
+                const maxReviews = top20Books[0];
+
+                document.getElementById('reviewCountInsight').textContent = 
+                    `전체 ${Object.keys(bookReviews).length}권의 도서 중 가장 많은 리뷰를 받은 도서는 "${maxReviews[0]}"로 ${maxReviews[1].toLocaleString()}개의 리뷰가 있습니다. ` +
+                    `도서당 평균 리뷰 수는 ${Math.round(avgReviews).toLocaleString()}개이며, 상위 20개 도서가 전체 리뷰의 ${((top20Books.reduce((a, b) => a + b[1], 0) / totalReviews) * 100).toFixed(1)}%를 차지하고 있습니다.`;
+
+                // 감성 분석을 위한 리뷰 데이터 로드
+                const reviewResponse = await fetch('../data/kyobo_book_sentiment_analysis.csv');
+                if (!reviewResponse.ok) {
+                    throw new Error(`리뷰 데이터 로드 실패: ${reviewResponse.status}`);
+                }
+                const reviewText = await reviewResponse.text();
+                const reviewRows = reviewText.split('\n')
+                    .filter(row => row.trim())
+                    .map(row => row.split(','));
+
+                if (reviewRows.length === 0) {
+                    throw new Error('리뷰 데이터 파일이 비어있습니다.');
+                }
+
+                const reviewHeaders = reviewRows[0].map(header => (header || '').trim());
+                
+                return reviewRows.slice(1)
+                    .filter(row => row.length === reviewHeaders.length)
+                    .map(row => {
+                        const obj = {};
+                        reviewHeaders.forEach((header, i) => {
+                            obj[header] = (row[i] || '').trim();
+                        });
+                        return obj;
+                    });
+            } catch (error) {
+                console.error('데이터 로드 중 오류 발생:', error);
+                document.getElementById('loading').textContent = '데이터 로드 중 오류가 발생했습니다. 상세 오류: ' + error.message;
+                return [];
+            }
+        }
+
+        function createReviewCountChart(data) {
+            // 이 함수는 더 이상 사용하지 않음 (loadData 함수에서 직접 처리)
+        }
+
+        function createSentimentDistributionChart(data) {
+            // 도서별 감성 분포 집계
+            const bookSentiments = {};
+            data.forEach(row => {
+                const title = row.도서제목;
+                if (title && title !== 'undefined' && title !== '0.8') {
+                    if (!bookSentiments[title]) {
+                        bookSentiments[title] = { positive: 0, negative: 0, neutral: 0, total: 0 };
+                    }
+                    const sentiment = parseFloat(row.감성점수);
+                    if (sentiment > 0) bookSentiments[title].positive++;
+                    else if (sentiment < 0) bookSentiments[title].negative++;
+                    else bookSentiments[title].neutral++;
+                    bookSentiments[title].total++;
+                }
+            });
+
+            // 상위 20개 도서 추출 (전체 리뷰 수 기준)
+            const top20Books = Object.entries(bookSentiments)
+                .sort((a, b) => b[1].total - a[1].total)
+                .slice(0, 20);
+
+            const ctx = document.getElementById('sentimentDistributionChart').getContext('2d');
+            new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: top20Books.map(book => book[0]),
+                    datasets: [{
+                        label: '긍정',
+                        data: top20Books.map(book => (book[1].positive / book[1].total * 100).toFixed(1)),
+                        backgroundColor: 'rgba(75, 192, 192, 0.8)',
+                        borderColor: 'rgba(75, 192, 192, 1)',
+                        borderWidth: 1
+                    }, {
+                        label: '중립',
+                        data: top20Books.map(book => (book[1].neutral / book[1].total * 100).toFixed(1)),
+                        backgroundColor: 'rgba(255, 206, 86, 0.8)',
+                        borderColor: 'rgba(255, 206, 86, 1)',
+                        borderWidth: 1
+                    }, {
+                        label: '부정',
+                        data: top20Books.map(book => (book[1].negative / book[1].total * 100).toFixed(1)),
+                        backgroundColor: 'rgba(255, 99, 132, 0.8)',
+                        borderColor: 'rgba(255, 99, 132, 1)',
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        datalabels: {
+                            color: '#000',
+                            font: {
+                                size: 20,
+                                weight: 'bold'
+                            },
+                            formatter: value => value + '%'
+                        },
+                        legend: {
+                            display: true,
+                            labels: {
+                                font: {
+                                    size: 20,
+                                    weight: 'bold'
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            stacked: true,
+                            ticks: {
+                                font: {
+                                    size: 20,
+                                    weight: 'bold'
+                                },
+                                maxRotation: 45,
+                                minRotation: 45
+                            }
+                        },
+                        y: {
+                            stacked: true,
+                            beginAtZero: true,
+                            max: 100,
+                            ticks: {
+                                font: {
+                                    size: 20,
+                                    weight: 'bold'
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+
+            // 인사이트 업데이트
+            const overallPositive = top20Books.reduce((sum, book) => sum + book[1].positive, 0);
+            const overallNeutral = top20Books.reduce((sum, book) => sum + book[1].neutral, 0);
+            const overallTotal = top20Books.reduce((sum, book) => sum + book[1].total, 0);
+            const mostPositiveBook = top20Books.reduce((a, b) => 
+                (b[1].positive / b[1].total) > (a[1].positive / a[1].total) ? b : a
+            );
+
+            document.getElementById('sentimentDistributionInsight').textContent = 
+                `상위 20개 도서의 전체 긍정 리뷰 비율은 ${((overallPositive / overallTotal) * 100).toFixed(1)}%이며, 중립 리뷰 비율은 ${((overallNeutral / overallTotal) * 100).toFixed(1)}%입니다. ` +
+                `가장 긍정적인 반응을 받은 도서는 "${mostPositiveBook[0]}"로, 긍정 비율이 ${((mostPositiveBook[1].positive / mostPositiveBook[1].total) * 100).toFixed(1)}%입니다. ` +
+                `전반적으로 독자들은 베스트셀러에 대해 긍정적인 평가를 하고 있습니다.`;
+        }
+
+        async function initializeCharts() {
+            const data = await loadData();
+            if (data.length > 0) {
+                createSentimentDistributionChart(data);
+                document.getElementById('loading').style.display = 'none';
+            }
+        }
+
+        // 페이지 로드 시 차트 초기화
+        initializeCharts();
+    </script>
+</body>
+</html> 
